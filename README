@@ -1,0 +1,62 @@
+执行顺序：
+1.给定一个起始的wiki条目
+2.获取这个条目，取出其中出现的其他wiki条目，根据规则给每个条目分配一个权值
+3.从所有已取得的条目中挑选出权值最大的那个，重复步骤2
+
+权值计算：
+weight = (frequence + importance + 1) / (depth + 1)
+1.frequence：条目出现的次数
+2.importance：条目的重要性
+3.depth：页面深度
+
+例如：
+从http://en.wikipedia.org/wiki/Yacc 出发，页面深度为1，页面的文字提到了/wiki/Computer_program, /wiki/Backus-Naur_form等，
+还有一个特殊的章节See Also，里面提到了/wiki/LALR_parse，/wiki/Backus-Naur_form等，
+现在假如：一个条目每在文章中出现一次frequence加1，每在see also中出现一次importance加100
+那么，对于这三个条目的权值：
+Computer_program：1+0+1/1+1 = 1
+Backus-Naur_form：1+100+1/1+1 = 51
+LALR_parse：0+100+1/1+1 = 50.5
+于是，取/wiki/Backus-Naur_form，设页面深度为2，重复以上步骤
+直到指定次数为止，输出权值最高的条目，制做成tag cloud页面
+
+
+样例：
+取页面：
+$ python wiki.py 5
+Apr 08 00:39:15 crawler.wiki[6592]: fetch (/wiki/Yacc, 101.0, 0+100/0)
+Apr 08 00:39:16 crawler.wiki[6592]: fetch (/wiki/GNU_bison, 101.5, 2+200/1)
+Apr 08 00:39:16 crawler.wiki[6592]: fetch (/wiki/Flex_lexical_analyser, 102.0, 3+200/1)
+Apr 08 00:39:17 crawler.wiki[6592]: fetch (/wiki/Lex_programming_tool, 102.5, 4+200/1)
+Apr 08 00:39:17 crawler.wiki[6592]: fetch (/wiki/Backus-Naur_form, 101.5, 2+200/1)
+101.5|Backus-Naur form|http://en.wikipedia.org/wiki/Backus-Naur_form
+203.5|Flex lexical analyser|http://en.wikipedia.org/wiki/Flex_lexical_analyser
+102.5|Lex programming tool|http://en.wikipedia.org/wiki/Lex_programming_tool
+103.0|GNU bison|http://en.wikipedia.org/wiki/GNU_bison
+306.0|Yacc|http://en.wikipedia.org/wiki/Yacc
+
+生成html
+$ python wiki.py 5 | python tagcloud.py 
+Apr 08 00:40:29 crawler.wiki[6623]: fetch (/wiki/Yacc, 101.0, 0+100/0)
+Apr 08 00:40:29 crawler.wiki[6623]: fetch (/wiki/GNU_bison, 101.5, 2+200/1)
+Apr 08 00:40:30 crawler.wiki[6623]: fetch (/wiki/Flex_lexical_analyser, 102.0, 3+200/1)
+Apr 08 00:40:31 crawler.wiki[6623]: fetch (/wiki/Lex_programming_tool, 102.5, 4+200/1)
+Apr 08 00:40:31 crawler.wiki[6623]: fetch (/wiki/Backus-Naur_form, 101.5, 2+200/1)
+<style>
+.smallest_tag a { font-size:xx-small; color:#666666; }
+.small_tag a { font-size:small;    color:#cc9999; }
+.medium_tag a { font-size:medium;   color:#cccccc; }
+.large_tag a { font-size:large;    color:#ff6666; }
+.largest_tag a { font-size:xx-large; color:#ff6600; }
+body    { background-color: #333333; }
+a       { text-decoration: none; }
+a:hover { color: green; }
+span    { margin: 4px; }
+</style>
+
+<span class="smallest_tag"><a href="http://en.wikipedia.org/wiki/Backus-Naur_form" title="101" target="_blank">Backus-Naur form</a></span>
+<span class="medium_tag"><a href="http://en.wikipedia.org/wiki/Flex_lexical_analyser" title="203" target="_blank">Flex lexical analyser</a></span>
+<span class="smallest_tag"><a href="http://en.wikipedia.org/wiki/Lex_programming_tool" title="102" target="_blank">Lex programming tool</a></span>
+<span class="smallest_tag"><a href="http://en.wikipedia.org/wiki/GNU_bison" title="103" target="_blank">GNU bison</a></span>
+<span class="largest_tag"><a href="http://en.wikipedia.org/wiki/Yacc" title="306" target="_blank">Yacc</a></span>
+
