@@ -9,15 +9,17 @@ styles = [
 ]
 
 def main():
-    tags = []
+    tags = {}
     for line in sys.stdin:
         try:
             priority, tag, href = line.strip().split('|', 2)
         except ValueError:
             continue
         weight = float(priority)
-        tags.append((weight, tag, href))
+        tags.setdefault(href, [tag, 0])
+        tags[href][1] += weight
 
+    tags = [ (weight, tag, href) for href, (tag, weight) in tags.items() ]
     ws = map(lambda x:x[0], tags)
     bins = get_bins(min(ws), max(ws), len(styles))
     write_cloud(tags, bins)

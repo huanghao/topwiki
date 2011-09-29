@@ -32,6 +32,27 @@ def wiki_join(tagid):
     return 'http://en.wikipedia.org'+tagid
 
 
+def timeout_input(prompt, second=5):
+    '''
+    return None if timeout else the input
+    '''
+    def interrupted(signum, frame):
+        "called when read times out"
+        pass
+    import signal
+    signal.signal(signal.SIGALRM, interrupted)
+
+    def input():
+        try:
+            return raw_input(prompt)
+        except: # timeout
+            pass
+
+    signal.alarm(second)
+    s = input()
+    signal.alarm(0) # disable the alarm after success
+    return s
+
 
 
 SEEALSO = 200
@@ -93,12 +114,13 @@ class Doc(object):
 
             see = content.find(id='See_also')
             if see:
-                ul = see.parent.findNextSibling('ul')
-                if ul:
-                    for a in ul.findAll('a', href=self.LOCAL):
+                tab = see.parent.findNext('table')
+                if tab:
+                    for a in tab.findAll('a', href=self.LOCAL):
                         href = a['href']
                         text = a.string
                         if href and text:
+                            #logger.info('seealso item:'+href+':'+text)
                             yield Tag(href, text, 0, SEEALSO, self.depth)
 
 
@@ -155,13 +177,25 @@ class Cloud(object):
 
     def round(self):
         tag = self.pop()
+        self._round(tag)
+
+    def _round(self, tag):
         logger.info('fetch '+str(tag))
         for t in tag.doc:
             logger.debug('add '+str(t))
             self.push(t)
 
+    def interactive_round(self):
+        while True:
+            tag = self.pop()
+            ch = timeout_input('Skip the tag %s[Y/N]:' % tag)
+            if ch not in ('Y', 'y'):
+                break
+        self._round(tag)
+
     def start(self, n):
         for _ in range(n):
+            #self.interactive_round()
             self.round()
 
     def print_tags(self):
@@ -172,7 +206,10 @@ class Cloud(object):
 
 
 def main(n):
-    genesis = Tag('/wiki/Yacc', 'yacc', 0, SEEALSO/2, 0)
+    #genesis = Tag('/wiki/Yacc', 'yacc', 0, SEEALSO/2, 0)
+    #genesis = Tag('/wiki/Formal_language', 'Formal_language', 0, SEEALSO/2, 0)
+    #genesis = Tag('/wiki/Automata_theory', 'Automata_theory', 0, SEEALSO/2, 0)
+    genesis = Tag('/wiki/Turing_machine', 'Turing_machine', 0, SEEALSO/2, 0)
     cloud = Cloud([genesis])
     cloud.start(n)
     cloud.print_tags()
