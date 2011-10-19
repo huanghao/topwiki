@@ -21,13 +21,19 @@ def main():
 
     tags = [ (weight, tag, href) for href, (tag, weight) in tags.items() ]
     ws = map(lambda x:x[0], tags)
-    bins = get_bins(min(ws), max(ws), len(styles))
+    bins = get_bins_by_weight(ws, len(styles))
+    bins = get_bins_by_number(ws, len(styles))
     write_cloud(tags, bins)
 
 
-def get_bins(_min, _max, n):
-    step = (_max-_min)/float(n)
-    return [ _min+step*i for i in range(1, n+1) ]
+def get_bins_by_weight(ws, n):
+    min_ = min(ws)
+    step = (max(ws)-min_)/float(n)
+    return [ min_+step*i for i in range(1, n+1) ]
+
+def get_bins_by_number(ws, n):
+    ws.sort()
+    return [ ws[(i*len(ws)/n-1)] for i in range(1, n+1) ]
 
 
 def write_styles():

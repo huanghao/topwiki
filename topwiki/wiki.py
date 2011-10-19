@@ -68,6 +68,7 @@ class Tag(object):
         self.depth = depth
         self._doc = None
         self.visited = False
+        self.text = text
 
     def __hash__(self):
         return self.id
@@ -154,11 +155,12 @@ class Queue(object):
 
 class Cloud(object):
 
-    def __init__(self, tags=[]):
+    def __init__(self, tags=[], excluding=[]):
         self.queue = Queue()
         self.repo = {}
         if tags:
             map(self.push, tags)
+        self.excluding = excluding
 
     def push(self, tag):
         if tag.id in self.repo:
@@ -180,6 +182,8 @@ class Cloud(object):
         self._round(tag)
 
     def _round(self, tag):
+        if tag.id in self.excluding:
+            return
         logger.info('fetch '+str(tag))
         for t in tag.doc:
             logger.debug('add '+str(t))
@@ -205,12 +209,12 @@ class Cloud(object):
                 print '|'.join([str(tag.weight), text, tag.url.encode('utf8')])
 
 
-def main(n):
+def main(n, excluding):
     #genesis = Tag('/wiki/Yacc', 'yacc', 0, SEEALSO/2, 0)
     #genesis = Tag('/wiki/Formal_language', 'Formal_language', 0, SEEALSO/2, 0)
-    #genesis = Tag('/wiki/Automata_theory', 'Automata_theory', 0, SEEALSO/2, 0)
-    genesis = Tag('/wiki/Turing_machine', 'Turing_machine', 0, SEEALSO/2, 0)
-    cloud = Cloud([genesis])
+    genesis = Tag('/wiki/Automata_theory', 'Automata_theory', 0, SEEALSO/2, 0)
+    #genesis = Tag('/wiki/Turing_machine', 'Turing_machine', 0, SEEALSO/2, 0)
+    cloud = Cloud([genesis], excluding)
     cloud.start(n)
     cloud.print_tags()
 
@@ -218,14 +222,16 @@ def main(n):
 if __name__ == '__main__':
     logging.config.fileConfig('logging.conf')
 
-    opts, args = getopt.getopt(sys.argv[1:], 'l:')
+    excluding = []
+    opts, args = getopt.getopt(sys.argv[1:], 'l:e:')
     for opt, val in opts:
         if opt == '-l':
             logging.getLogger('crawler').setLevel({'d': logging.DEBUG,
                                                    'i': logging.INFO,
                                                    'e': logging.ERROR,
                                                    }[val])
-    n = int(args[0])
+        elif opt == '-e':
+            excluding = val.split()
 
-    main(n)
+    main(int(args[0]), excluding)
     sys.exit(0)
