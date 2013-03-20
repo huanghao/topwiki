@@ -1,104 +1,98 @@
 import re
-import sys
 import os
-import getopt
-import cPickle
-import urllib2
-import urllib
+import sys
+import argparse
 import itertools
 from heapq import heappush, heappop
-import logging.config
-import logging
 from BeautifulSoup import BeautifulSoup as BS
 
-from mem import StringCache
-from limit import Limit
+from mem import wget
+
+'''
+TODO:
+step by step interactive
+manually prune
+continue to run base on previous state
+'''
+
+def info(msg):
+    print >> sys.stderr, msg
+
+VERBOSE = 0
+def debug(msg):
+    if VERBOSE > 1:
+        print >> sys.stderr, msg
 
 
-logger = logging.getLogger('crawler.wiki')
-
-
-def curl(url):
-    req = urllib2.Request(url)
-    req.add_header('User-Agent', 'Mozilla/5.0 (X11; U; Linux i686; en-US) AppleWebKit/534.16 (KHTML, like Gecko) Chrome/10.0.648.204 Safari/534.16')
-    logger.info('urlopen '+url)
-    f = urllib2.urlopen(req)
-    return f.read()
-
-GET = StringCache(Limit(curl, 60, 3, 20), 'cache_wiki')
-
-
+WIKI_BASE = 'http://en.wikipedia.org'
 def wiki_join(tagid):
-    return 'http://en.wikipedia.org'+tagid
+    return WIKI_BASE +tagid
+
+def wiki_text(url):
+    return os.path.basename(url)
 
 
-def timeout_input(prompt, second=5):
-    '''
-    return None if timeout else the input
-    '''
-    def interrupted(signum, frame):
-        "called when read times out"
-        pass
-    import signal
-    signal.signal(signal.SIGALRM, interrupted)
-
-    def input():
-        try:
-            return raw_input(prompt)
-        except: # timeout
-            pass
-
-    signal.alarm(second)
-    s = input()
-    signal.alarm(0) # disable the alarm after success
-    return s
-
-
-
-SEEALSO = 200
-OCCUR = 1
+IMPORTANCE_SEEALSO = 200
+IMPORTANCE_OCCUR = 1
 
 class Tag(object):
+    '''A tag represents a wiki url and corresponding info such as importance,
+    frequency, depth which are used to calculate weight of this page.
+    '''
 
-    def __init__(self, id, text, frequence, importance, depth):
-        self.id = id
-        self.url = wiki_join(self.id)
-        self.frequence = frequence
+    def __init__(self, url,
+                 importance=IMPORTANCE_SEEALSO/2,
+                 depth=0,
+                 text=None,
+                 frequency=1):
+        '''
+        '''
+
+        self.url = url
         self.importance = importance
+        self.frequency = frequency
         self.depth = depth
         self._doc = None
         self.visited = False
-        self.text = text
+        self.text = text if text else wiki_text(url)
+        self.excluded = False
 
     def __hash__(self):
-        return self.id
+        return hash(self.url)
 
-    @property
-    def doc(self):
+    def __eq__(self, that):
+        return hash(self) == hash(that)
+
+    def iter_doc(self):
         if self._doc is None:
-            self._doc =Doc(GET(self.url), self.depth)
+            self._doc =Doc(wget(self.url), self.depth)
         return self._doc
 
     @property
     def weight(self):
-        return (self.frequence + self.importance + 1.) / (self.depth + 1.)
+        return float(self.frequency + self.importance) / (self.depth + 1)
 
     def __str__(self):
-        return '(%s, %.1f, %d+%d/%d)' % (self.id, self.weight, self.frequence, self.importance, self.depth)
+        buf = '(%s, %.1f, %s+%s/%s)' % (self.text,
+                                        self.weight,
+                                        self.frequency,
+                                        self.importance,
+                                        self.depth)
+        return buf.encode('utf8')
 
-    def __iadd__(self, r):
-        if self.id == r.id:
-            self.frequence += r.frequence
-            self.importance += r.importance
-            self.depth = min(self.depth, r.depth)
-            self.visited = self.visited or r.visited
+    def update(self, that):
+        if self == that:
+            self.frequency += that.frequency
+            self.importance += that.importance
+            self.depth = min(self.depth, that.depth)
+            self.visited = self.visited or that.visited
         return self
 
 
 class Doc(object):
 
     LOCAL = re.compile('^/wiki/')
-    
+
     def __init__(self, html, depth):
         self.html = html
         self.depth = depth + 1
@@ -111,7 +105,10 @@ class Doc(object):
                 href = a['href']
                 text = a.string
                 if href and text:
-                    yield Tag(href, text, OCCUR, 0, self.depth)
+                    yield Tag(wiki_join(href),
+                              IMPORTANCE_OCCUR,
+                              self.depth,
+                              text)
 
             see = content.find(id='See_also')
             if see:
@@ -121,8 +118,10 @@ class Doc(object):
                         href = a['href']
                         text = a.string
                         if href and text:
-                            #logger.info('seealso item:'+href+':'+text)
-                            yield Tag(href, text, 0, SEEALSO, self.depth)
+                            yield Tag(wiki_join(href),
+                                      IMPORTANCE_SEEALSO,
+                                      self.depth,
+                                      text)
 
 
 class Queue(object):
@@ -135,19 +134,19 @@ class Queue(object):
         self.tag2cnt = {}
 
     def push(self, tag):
-        if tag.id in self.tag2cnt:
-            self.cnt2entry[self.tag2cnt[tag.id]][2] = False
+        if tag.url in self.tag2cnt:
+            self.cnt2entry[self.tag2cnt[tag.url]][2] = False
 
         cnt = next(self.counter)
         entry = [-tag.weight, cnt, True, tag]
-        self.tag2cnt[tag.id] = cnt
+        self.tag2cnt[tag.url] = cnt
         self.cnt2entry[cnt] = entry
 
         heappush(self.pq, entry)
 
     def pop(self):
         while self.pq:
-            priority, cnt, valid, tag = heappop(self.pq)
+            _priority, cnt, valid, tag = heappop(self.pq)
             del self.cnt2entry[cnt]
             if valid and tag.weight >= 1:
                 return tag
@@ -155,83 +154,104 @@ class Queue(object):
 
 class Cloud(object):
 
-    def __init__(self, tags=[], excluding=[]):
+    def __init__(self, tags=(), excluding=None):
         self.queue = Queue()
         self.repo = {}
-        if tags:
-            map(self.push, tags)
-        self.excluding = excluding
+        for tag in tags:
+            self.push(tag)
+        self.excluding = excluding if excluding else ()
 
     def push(self, tag):
-        if tag.id in self.repo:
-            self.repo[tag.id] += tag
-            tag = self.repo[tag.id]
+        if tag.url in self.repo:
+            self.repo[tag.url].update(tag)
+            tag = self.repo[tag.url]
         else:
-            self.repo[tag.id] = tag
+            self.repo[tag.url] = tag
 
         if not tag.visited:
             self.queue.push(tag)
 
     def pop(self):
         tag = self.queue.pop()
-        self.repo[tag.id].visited = True
-        return tag
-
-    def round(self):
-        tag = self.pop()
-        self._round(tag)
-
-    def _round(self, tag):
-        if tag.id in self.excluding:
-            return
-        logger.info('fetch '+str(tag))
-        for t in tag.doc:
-            logger.debug('add '+str(t))
-            self.push(t)
-
-    def interactive_round(self):
-        while True:
-            tag = self.pop()
-            ch = timeout_input('Skip the tag %s[Y/N]:' % tag)
-            if ch not in ('Y', 'y'):
-                break
-        self._round(tag)
+        if tag:
+            self.repo[tag.url].visited = True
+            return tag
 
     def start(self, n):
-        for _ in range(n):
-            #self.interactive_round()
-            self.round()
+        i = 0
+        while i < n:
+            tag = self.pop()
+            debug('pop: %s' % tag)
 
-    def print_tags(self):
-        for id, tag in self.repo.iteritems():
-            if tag.visited:
-                text = urllib.unquote(id)[len('/wiki/'):].replace('_', ' ').encode('utf8')
-                print '|'.join([str(tag.weight), text, tag.url.encode('utf8')])
+            if not tag: # queue empty
+                break
+
+            if i > 0:
+                # exclude matched tag but not the first one which is given by
+                # user from command line
+                for ex in self.excluding:
+                    if ex.match(tag.text):
+                        debug('skip: %s' % tag)
+                        tag.excluded = 1
+                        break
+
+                if tag.excluded:
+                    continue
+
+            i += 1
+            info('tag: %s' % tag.text)
+            for tagi in tag.iter_doc():
+                debug('put: %s' % tagi)
+                self.push(tagi)
+
+    def write_tags(self, fp):
+        for tag in self.repo.itervalues():
+            if tag.visited and not tag.excluded:
+                print >> fp, '|'.join([str(tag.weight),
+                                       tag.text,
+                                       tag.url,
+                                       ])
 
 
-def main(n, excluding):
-    #genesis = Tag('/wiki/Yacc', 'yacc', 0, SEEALSO/2, 0)
-    #genesis = Tag('/wiki/Formal_language', 'Formal_language', 0, SEEALSO/2, 0)
-    genesis = Tag('/wiki/Automata_theory', 'Automata_theory', 0, SEEALSO/2, 0)
-    #genesis = Tag('/wiki/Turing_machine', 'Turing_machine', 0, SEEALSO/2, 0)
-    cloud = Cloud([genesis], excluding)
-    cloud.start(n)
-    cloud.print_tags()
+class ExcludePattern(object):
+
+    def __init__(self, pattern):
+        self._pattern_string = pattern
+        self.pattern = re.compile('^'+pattern+'$')
+
+    def match(self, string):
+        return self.pattern.match(string)
+
+
+def main():
+    args = parse_args()
+    global VERBOSE
+    VERBOSE = args.verbose
+
+    #genesis = Tag('/wiki/Yacc', 'yacc', 0, IMPORTANCE_SEEALSO/2, 0)
+    #genesis = Tag('/wiki/Formal_language', 'Formal_language', 0, IMPORTANCE_SEEALSO/2, 0)
+    #genesis = Tag('/wiki/Automata_theory', 'Automata_theory', 0, IMPORTANCE_SEEALSO/2, 0)
+    #genesis = Tag('/wiki/Turing_machine', 'Turing_machine', 0, IMPORTANCE_SEEALSO/2, 0)
+
+    cloud = Cloud([Tag(args.seed)], args.exclude)
+    cloud.start(args.topn)
+
+    if args.output_file:
+        with open(args.output_file, 'w') as fp:
+            cloud.write_tags(fp)
+    else:
+        cloud.write_tags(sys.stdout)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('seed')
+    parser.add_argument('topn', default=10, type=int)
+    parser.add_argument('-e', '--exclude', action='append', type=ExcludePattern)
+    parser.add_argument('-v', '--verbose', action='count')
+    parser.add_argument('-o', '--output-file')
+    return parser.parse_args()
 
 
 if __name__ == '__main__':
-    logging.config.fileConfig('logging.conf')
-
-    excluding = []
-    opts, args = getopt.getopt(sys.argv[1:], 'l:e:')
-    for opt, val in opts:
-        if opt == '-l':
-            logging.getLogger('crawler').setLevel({'d': logging.DEBUG,
-                                                   'i': logging.INFO,
-                                                   'e': logging.ERROR,
-                                                   }[val])
-        elif opt == '-e':
-            excluding = val.split()
-
-    main(int(args[0]), excluding)
-    sys.exit(0)
+    main()

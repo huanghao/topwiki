@@ -1,69 +1,42 @@
 import os
-import hashlib
-import urllib2
-import logging
 
 
-logger = logging.getLogger('crawler.mylib.mem')
-
-
-class DoesNotExist(Exception): pass
-
+def wget(url):
+    '''fetch url page, if it's cached, return the cached version
+    '''
+    cache = Cache(url)
+    if not cache.is_cached():
+        path = os.path.abspath(cache.key)
+        _wget(url, path)
+    return cache.get()
 
 
 class Cache(object):
+    '''file cache contained in {rootdir}.
+    cache key is the relative path to {rootdir}
+    just remove file to clean cache
+    '''
 
-    def __init__(self, func):
-        self.func = func
-        self.funcname = func.__name__
+    rootdir = 'cache'
 
-    def __call__(self, *args, **kw):
-        hash = self.hash(self.funcname, args, kw)
-        try:
-            return self.query(hash)
-        except DoesNotExist:
-            data = self.func(*args, **kw)
-            self.save(hash, data)
-            return data
+    def __init__(self, url):
+        self.key = os.path.join(self.rootdir, url2path(url))
 
+    def is_cached(self):
+        return os.path.exists(self.key)
 
-class StringCache(Cache):
-
-    def __init__(self, func, repo):
-        super(StringCache, self).__init__(func)
-        self.repo = repo
-
-    def query(self, hash):
-        if not os.path.exists(self.path(hash)):
-            raise DoesNotExist()
-        return open(self.path(hash)).read()
-
-    def save(self, hash, data):
-        try:
-            with open(self.path(hash), 'w') as f:
-                f.write(data)
-        except:
-            os.unlink(self.path(hash))
-            raise
-
-    def hash(self, funcname, args, kw):
-        s = funcname + \
-            ''.join(map(str, args)) + \
-            ''.join([ str(k)+str(v) for k,v in sorted(kw.iteritems(), lambda i,j: cmp(i[0], j[0])) ])
-        h = hashlib.md5(s).hexdigest()
-        return h
-
-    def path(self, hash):
-        return os.path.join(self.repo, hash)
+    def get(self):
+        with open(self.key) as fp:
+            return fp.read()
 
 
-def _GET(url, *args, **kw):
-    req = urllib2.Request(url)
-    req.add_header('User-Agent', 'Mozilla/5.0 (X11; U; Linux i686; en-US) AppleWebKit/534.16 (KHTML, like Gecko) Chrome/10.0.648.204 Safari/534.16')
-    logger.info('urlopen '+url)
-    f = urllib2.urlopen(req, *args, **kw)
-    return f.read()
-
-#GET = StringCache(Limit(curl, 10, 3, 3), 'cache_wiki')
+def url2path(url):
+    pos = url.find('://')
+    return url[pos+3:] if pos > 0 else url
 
 
+def _wget(url, outpath):
+    '''wget url and save into outpath'''
+    cmd = "mkdir -p '%s'; wget -nv '%s' -O '%s'" % \
+        (os.path.dirname(outpath), url, outpath)
+    os.system(cmd)
