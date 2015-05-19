@@ -4,9 +4,10 @@ import sys
 import argparse
 import itertools
 from heapq import heappush, heappop
-from BeautifulSoup import BeautifulSoup as BS
 
-from mem import wget
+import requests
+from BeautifulSoup import BeautifulSoup as BS
+import requests_cache
 
 '''
 TODO:
@@ -20,7 +21,7 @@ def info(msg):
 
 VERBOSE = 0
 def debug(msg):
-    if VERBOSE > 1:
+    if VERBOSE > 0:
         print >> sys.stderr, msg
 
 
@@ -32,7 +33,7 @@ def wiki_text(url):
     return os.path.basename(url)
 
 
-IMPORTANCE_SEEALSO = 200
+IMPORTANCE_SEEALSO = 10
 IMPORTANCE_OCCUR = 1
 
 class Tag(object):
@@ -45,9 +46,6 @@ class Tag(object):
                  depth=0,
                  text=None,
                  frequency=1):
-        '''
-        '''
-
         self.url = url
         self.importance = importance
         self.frequency = frequency
@@ -65,7 +63,8 @@ class Tag(object):
 
     def iter_doc(self):
         if self._doc is None:
-            self._doc =Doc(wget(self.url), self.depth)
+            html = requests.get(self.url).content
+            self._doc = Doc(html, self.depth)
         return self._doc
 
     @property
@@ -91,7 +90,7 @@ class Tag(object):
 
 class Doc(object):
 
-    LOCAL = re.compile('^/wiki/')
+    LOCAL = re.compile(r'^/wiki/[^:]+$')
 
     def __init__(self, html, depth):
         self.html = html
@@ -217,7 +216,7 @@ class ExcludePattern(object):
 
     def __init__(self, pattern):
         self._pattern_string = pattern
-        self.pattern = re.compile('^'+pattern+'$')
+        self.pattern = re.compile(pattern, re.I)
 
     def match(self, string):
         return self.pattern.match(string)
@@ -228,6 +227,7 @@ def main():
     global VERBOSE
     VERBOSE = args.verbose
 
+    requests_cache.install_cache()
     #genesis = Tag('/wiki/Yacc', 'yacc', 0, IMPORTANCE_SEEALSO/2, 0)
     #genesis = Tag('/wiki/Formal_language', 'Formal_language', 0, IMPORTANCE_SEEALSO/2, 0)
     #genesis = Tag('/wiki/Automata_theory', 'Automata_theory', 0, IMPORTANCE_SEEALSO/2, 0)
